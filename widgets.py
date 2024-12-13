@@ -15,6 +15,25 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.setCentralWidget(centralWidget)
 
+class AddressConverterGroup(QtWidgets.QWidget):
+    def __init__(self):
+        super().__init__()
+
+        layout = QtWidgets.QGridLayout()
+        self.setLayout(layout)
+
+        groupbox = QtWidgets.QGroupBox("Address Converter")
+        layout.addWidget(groupbox)
+
+        vBox = QtWidgets.QVBoxLayout()
+        vBox.addStretch()
+        groupbox.setLayout(vBox)
+
+        vBox.addWidget(AddressConverter())
+        vBox.addWidget(AddressConverter())
+        vBox.addWidget(AddressConverter())
+        vBox.addWidget(AddressConverter())
+
 class AddressConverter(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
@@ -41,25 +60,6 @@ class AddressConverter(QtWidgets.QWidget):
         else:
             otherSeg = core.convertSegmentToBinarySegment(segmentValue)
             self.ipBinaryWidget.setSegment(segmentNum, otherSeg)
-
-class AddressConverterGroup(QtWidgets.QWidget):
-    def __init__(self):
-        super().__init__()
-
-        layout = QtWidgets.QGridLayout()
-        self.setLayout(layout)
-
-        groupbox = QtWidgets.QGroupBox("Address Converter")
-        layout.addWidget(groupbox)
-
-        vBox = QtWidgets.QVBoxLayout()
-        vBox.addStretch()
-        groupbox.setLayout(vBox)
-
-        vBox.addWidget(AddressConverter())
-        vBox.addWidget(AddressConverter())
-        vBox.addWidget(AddressConverter())
-        vBox.addWidget(AddressConverter())
 
 class IPv4Segment(QtWidgets.QLineEdit):
     @classmethod
