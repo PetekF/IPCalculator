@@ -29,6 +29,12 @@ def convertSegmentToBinarySegment(segment):
     num = int(segment, 10)
     formatted = format(num, 'b')
 
+    filler = ''
+    for i in range(8 - len(formatted)):
+        filler = filler + '0'
+
+    formatted = filler + formatted
+
     return formatted
 
 def convertBinarySegmentToSegment(binarySegment):
