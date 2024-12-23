@@ -1,8 +1,11 @@
 from PySide6 import QtCore, QtWidgets, QtGui
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QWidget, QLineEdit
+from shiboken6 import isValid
 
 import core
+from core import networkBitsToOctetValue
+
 
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
@@ -29,16 +32,6 @@ def QLineEditAsIpAddress():
 
     return line
 
-def QLineEditAsShortSubnetMask():
-    line = QtWidgets.QLineEdit()
-
-    line.setReadOnly(True)
-    line.setMinimumWidth(20)
-    line.setMaximumWidth(30)
-    line.setPlaceholderText('/0')
-
-    return line
-
 class NetworkInfoGroup(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
@@ -60,11 +53,10 @@ class NetworkInfoGroup(QtWidgets.QWidget):
         subnetPairLayout.addSpacing(15)
         subnetPairLayout.addWidget(QLineEditAsShortSubnetMask())
 
-        subnetPair = QtWidgets.QWidget()
-        subnetPair.setLayout(subnetPairLayout)
+        subnetMask = SubnetMask()
 
         boxLayout.addWidget(QtWidgets.QLabel("Subnet Mask:"), 1, 0, Qt.AlignmentFlag.AlignRight)
-        boxLayout.addWidget(subnetPair, 1, 1, Qt.AlignmentFlag.AlignLeft)
+        boxLayout.addWidget(subnetMask, 1, 1, Qt.AlignmentFlag.AlignLeft)
 
         boxLayout.addWidget(QtWidgets.QLabel("Network Address:"), 2, 0, Qt.AlignmentFlag.AlignRight)
         boxLayout.addWidget(QLineEditAsIpAddress(), 2, 1, Qt.AlignmentFlag.AlignLeft)
@@ -179,21 +171,24 @@ class IPv4DecimalOctet(IPv4Octet):
         self.setMaxLength(3)
         self.setMaximumWidth(30)
         self.setAlignment(QtCore.Qt.AlignRight)
-        self.setPlaceholderText('0')
-        self.setValidator(QtGui.QIntValidator())
+        self.setInputMask('999')
+        self.setText('000')
+        # self.setValidator(QtGui.QIntValidator(0, 255, self))
 
 class IPv4BinaryOctet(IPv4Octet):
     def __init__(self):
         super().__init__()
         self.binaryMode = True
-        self.defaultValue = '00000000'
+        # self.defaultValue = '00000000'
 
         self.setMaxLength(8)
         self.setMinimumWidth(70)
         self.setMaximumWidth(70)
         self.setAlignment(QtCore.Qt.AlignRight)
-        self.setPlaceholderText('00000000')
-        self.setValidator(QtGui.QIntValidator())
+        # self.setPlaceholderText('00000000')
+        self.setInputMask('BBBBBBBB')
+        self.setText('00000000')
+        # self.setValidator(QtGui.QIntValidator())
 
 class IPv4(QtWidgets.QWidget):
     def __init__(self, binaryMode = False):
@@ -268,43 +263,71 @@ class IPv4(QtWidgets.QWidget):
         else:
             super().keyPressEvent(event)
 
-class SubnetMask(QtWidgets.QWidget):
-    validOctetValues = [255, 254, 252, 248, 240, 224, 192, 128, 0]
+def QLineEditAsShortSubnetMask():
+    line = QtWidgets.QLineEdit()
 
-    # Maybe allow hiding and showing of full mask instead of having to recreate the widget
-    def __init__(self, binaryMode = False):
+    line.setMinimumWidth(20)
+    line.setMaximumWidth(30)
+
+    line.setInputMask('/#9')
+    line.setText('0')
+
+    return line
+
+class SubnetMask(QtWidgets.QWidget):
+    def __init__(self):
         super().__init__()
 
-        self.fullMask = IPv4Octet.binary() if binaryMode else IPv4Octet.decimal()
-        self.shortMask = QtWidgets.QLineEdit()
+        self.fullMask = IPv4()
+        self.fullMask.addOctetChangedHandler(self.onOctetChanged)
 
-        self.fullMask.addOctetChangedHandler(self.onMaskOctetChanged)
+        self.shortMask = QLineEditAsShortSubnetMask()
+        self.shortMask.textEdited.connect(lambda: self.onShortMaskChanged(self.shortMask.text()[1:]))
 
-    def onMaskOctetChanged(self, octetNum, octetValue, isBinary = False):
-        isValid = False
-        octetNum = int(octetNum, 10)
+        layout = QtWidgets.QHBoxLayout(self)
+        layout.addWidget(self.fullMask)
+        layout.addWidget(self.shortMask)
 
-        if octetNum in SubnetMask.validOctetValues:
-            isValid = True
+    def onOctetChanged(self, octetPosition, octet, isBinary = False):
+        isValid = True
+        networkBits = 0
 
-        previousOctets = octetNum - 1
+        prevOctetValue = 255 #Fake initial value to make the loop work
+        for i in range(1, 5):
+            currentOctet = self.fullMask.getOctet(i)
+            currentOctetValue = int(currentOctet, 10)
+            currentOctetNetworkBits = core.networkBitsInOctetValue(currentOctetValue)
 
-        invalidPreviousOctets = []
-
-        for i in range(previousOctets):
-            prevOctet = self.fullMask.getOctet(i + 1)
-            prevOctetNum = int(prevOctet, 10)
-
-            if prevOctetNum != 255:
+            if currentOctetNetworkBits == -1 or currentOctetNetworkBits > 0 and prevOctetValue != 255:
                 isValid = False
-                invalidPreviousOctets.append(i + 1)
-        #
-        # if isValid:
-        #     # change short mask value
-        #     x = previousOctets * 8 + octetNum
-        # else:
-        #     # short mask = /-1
+                break
 
-    def invalidOctetDetected(self, octetNum):
-        a = 1
-        # color octet border in different color
+            networkBits += currentOctetNetworkBits
+            prevOctetValue = currentOctetValue
+
+        if isValid:
+            self.shortMask.setText(str(networkBits))
+        else:
+            self.shortMask.setText(str(-1))
+
+    def onShortMaskChanged(self, mask):
+        try:
+            maskValue = int(mask, 10)
+        except ValueError:
+            maskValue = 0
+
+        if maskValue >= 0 and maskValue <= 32:
+            fullOctets = int(maskValue / 8)
+            lastOcetBits = maskValue % 8
+
+            for i in range(fullOctets):
+                self.fullMask.setOctet(i + 1, '255')
+
+            self.fullMask.setOctet(fullOctets + 1, str(core.networkBitsToOctetValue(lastOcetBits)))
+
+            emptyOctets = 4 - fullOctets + 1
+            for i in range(emptyOctets):
+                self.fullMask.setOctet(fullOctets + 1 + i + 1, '0')
+        else:
+            for i in range(4):
+                self.fullMask.setOctet(i + 1, '0')
