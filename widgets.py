@@ -15,9 +15,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
         layout = QtWidgets.QGridLayout(centralWidget)
         topLeft = Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignTop
+        bottomLeft= Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignBottom
+        topRight = Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTop
+        bottomRight = Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignBottom
 
-        layout.addWidget(AddressConverterGroup(), 0, 0, topLeft)
-        layout.addWidget(NetworkInfoGroup(), 1, 0, topLeft)
+        layout.addWidget(AddressConverterGroup(), 0, 0, topRight)
+        layout.addWidget(NetworkInfoGroup(), 0, 1, topLeft)
 
         self.setCentralWidget(centralWidget)
 
@@ -45,30 +48,32 @@ class NetworkInfoGroup(QtWidgets.QWidget):
         boxLayout = QtWidgets.QGridLayout()
         groupbox.setLayout(boxLayout)
 
+        self.ipAddress = IPv4()
+
         boxLayout.addWidget(QtWidgets.QLabel("IP Address:"), 0, 0, Qt.AlignmentFlag.AlignRight)
-        boxLayout.addWidget(IPv4(), 0, 1, Qt.AlignmentFlag.AlignLeft)
+        boxLayout.addWidget(self.ipAddress, 0, 1, Qt.AlignmentFlag.AlignLeft)
 
-        subnetPairLayout = QtWidgets.QHBoxLayout()
-        subnetPairLayout.addWidget(IPv4())
-        subnetPairLayout.addSpacing(15)
-        subnetPairLayout.addWidget(QLineEditAsShortSubnetMask())
-
-        subnetMask = SubnetMask()
+        self.subnetMask = SubnetMask()
 
         boxLayout.addWidget(QtWidgets.QLabel("Subnet Mask:"), 1, 0, Qt.AlignmentFlag.AlignRight)
-        boxLayout.addWidget(subnetMask, 1, 1, Qt.AlignmentFlag.AlignLeft)
+        boxLayout.addWidget(self.subnetMask, 1, 1, Qt.AlignmentFlag.AlignLeft)
 
+        self.networkAddress = QLineEditAsIpAddress()
         boxLayout.addWidget(QtWidgets.QLabel("Network Address:"), 2, 0, Qt.AlignmentFlag.AlignRight)
-        boxLayout.addWidget(QLineEditAsIpAddress(), 2, 1, Qt.AlignmentFlag.AlignLeft)
+        boxLayout.addWidget(self.networkAddress, 2, 1, Qt.AlignmentFlag.AlignLeft)
 
+        self.broadcastAddress = QLineEditAsIpAddress()
         boxLayout.addWidget(QtWidgets.QLabel("Broadcast Address:"), 3, 0, Qt.AlignmentFlag.AlignRight)
-        boxLayout.addWidget(QLineEditAsIpAddress(), 3, 1, Qt.AlignmentFlag.AlignLeft)
+        boxLayout.addWidget(self.broadcastAddress, 3, 1, Qt.AlignmentFlag.AlignLeft)
 
+
+        self.minAddress = QLineEditAsIpAddress()
+        self.maxAddress = QLineEditAsIpAddress()
 
         rangeLayout = QtWidgets.QHBoxLayout()
-        rangeLayout.addWidget(QLineEditAsIpAddress())
+        rangeLayout.addWidget(self.minAddress)
         rangeLayout.addWidget(QtWidgets.QLabel("-"))
-        rangeLayout.addWidget(QLineEditAsIpAddress())
+        rangeLayout.addWidget(self.maxAddress)
 
         addressRange = QtWidgets.QWidget()
         addressRange.setLayout(rangeLayout)
@@ -80,6 +85,27 @@ class NetworkInfoGroup(QtWidgets.QWidget):
         btn.setStyleSheet("background-color: darkcyan")
         boxLayout.addWidget(btn, 5, 0, 1, 2)
 
+        btn.clicked.connect(lambda: self.onButtonClicked())
+
+    def onButtonClicked(self):
+        # TODO: Add some validation
+        ip = [int(self.ipAddress.getOctet(1)), int(self.ipAddress.getOctet(2)), int(self.ipAddress.getOctet(3)), int(self.ipAddress.getOctet(4))]
+        subnet = [int(self.subnetMask.fullMask.getOctet(1)), int(self.subnetMask.fullMask.getOctet(2)), int(self.subnetMask.fullMask.getOctet(3)), int(self.subnetMask.fullMask.getOctet(4))]
+
+        networkAddress = core._calculateNetworkAddress(ip, subnet)
+        broadcastAddress = core._calculateBroadcastAddress(ip, subnet)
+        minAddress, maxAddress = core._firstAndLastUsefulAddress(ip, subnet)
+
+        for i in range(4):
+            networkAddress[i] = format(networkAddress[i], 'd')
+            broadcastAddress[i] = format(broadcastAddress[i], 'd')
+            minAddress[i] = format(minAddress[i], 'd')
+            maxAddress[i] = format(maxAddress[i], 'd')
+
+        self.networkAddress.setText('.'.join(networkAddress))
+        self.broadcastAddress.setText('.'.join(broadcastAddress))
+        self.minAddress.setText('.'.join(minAddress))
+        self.maxAddress.setText('.'.join(maxAddress))
 
 class AddressConverterGroup(QtWidgets.QWidget):
     def __init__(self):
@@ -288,6 +314,7 @@ class SubnetMask(QtWidgets.QWidget):
         layout.addWidget(self.fullMask)
         layout.addWidget(self.shortMask)
 
+    #TODO: Move calculations from this mehod to 'core'
     def onOctetChanged(self, octetPosition, octet, isBinary = False):
         isValid = True
         networkBits = 0
@@ -310,6 +337,7 @@ class SubnetMask(QtWidgets.QWidget):
         else:
             self.shortMask.setText(str(-1))
 
+    #TODO: Move calculations from this mehod to 'core'
     def onShortMaskChanged(self, mask):
         try:
             maskValue = int(mask, 10)
