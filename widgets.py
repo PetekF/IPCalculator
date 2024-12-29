@@ -1,11 +1,6 @@
 from PySide6 import QtCore, QtWidgets, QtGui
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QWidget, QLineEdit
-from shiboken6 import isValid
-
 import core
-from core import networkBitsToOctetValue
-
 
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
@@ -23,6 +18,7 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addWidget(NetworkInfoGroup(), 0, 1, topLeft)
 
         self.setCentralWidget(centralWidget)
+
 
 def QLineEditAsIpAddress():
     line = QtWidgets.QLineEdit()
@@ -69,11 +65,15 @@ class NetworkInfoGroup(QtWidgets.QWidget):
 
         self.minAddress = QLineEditAsIpAddress()
         self.maxAddress = QLineEditAsIpAddress()
+        self.addressRangeQuantity = QtWidgets.QLabel()
 
         rangeLayout = QtWidgets.QHBoxLayout()
         rangeLayout.addWidget(self.minAddress)
         rangeLayout.addWidget(QtWidgets.QLabel("-"))
         rangeLayout.addWidget(self.maxAddress)
+        rangeLayout.addWidget(QtWidgets.QLabel("("))
+        rangeLayout.addWidget(self.addressRangeQuantity)
+        rangeLayout.addWidget(QtWidgets.QLabel(")"))
 
         addressRange = QtWidgets.QWidget()
         addressRange.setLayout(rangeLayout)
@@ -88,13 +88,14 @@ class NetworkInfoGroup(QtWidgets.QWidget):
         btn.clicked.connect(lambda: self.onButtonClicked())
 
     def onButtonClicked(self):
-        # TODO: Add some validation
-        ip = [int(self.ipAddress.getOctet(1)), int(self.ipAddress.getOctet(2)), int(self.ipAddress.getOctet(3)), int(self.ipAddress.getOctet(4))]
-        subnet = [int(self.subnetMask.fullMask.getOctet(1)), int(self.subnetMask.fullMask.getOctet(2)), int(self.subnetMask.fullMask.getOctet(3)), int(self.subnetMask.fullMask.getOctet(4))]
 
-        networkAddress = core._calculateNetworkAddress(ip, subnet)
-        broadcastAddress = core._calculateBroadcastAddress(ip, subnet)
-        minAddress, maxAddress = core._firstAndLastUsefulAddress(ip, subnet)
+        ip = self.ipAddress.getIpAddress()
+        subnet = self.subnetMask.getMask()
+
+        networkAddress = core.calculateNetworkAddress(ip, subnet)
+        broadcastAddress = core.calculateBroadcastAddress(ip, subnet)
+        minAddress, maxAddress = core.calculateFirstAndLastAddress(networkAddress, broadcastAddress)
+        addresses = core.calculateAddressRange(minAddress, maxAddress)
 
         for i in range(4):
             networkAddress[i] = format(networkAddress[i], 'd')
@@ -106,6 +107,8 @@ class NetworkInfoGroup(QtWidgets.QWidget):
         self.broadcastAddress.setText('.'.join(broadcastAddress))
         self.minAddress.setText('.'.join(minAddress))
         self.maxAddress.setText('.'.join(maxAddress))
+
+        self.addressRangeQuantity.setText(str(addresses))
 
 class AddressConverterGroup(QtWidgets.QWidget):
     def __init__(self):
@@ -133,10 +136,12 @@ class AddressConverter(QtWidgets.QWidget):
         hBox = QtWidgets.QHBoxLayout(self)
 
         self.ipWidget = IPv4()
-        self.ipWidget.addOctetChangedHandler(self.onOctetChanged)
+        # self.ipWidget.addOctetChangedHandler(self.onOctetChanged)
+        self.ipWidget.addOctetValueChangedHandler(self.onDecOctetValueChanged)
 
         self.ipBinaryWidget = IPv4(binaryMode=True)
-        self.ipBinaryWidget.addOctetChangedHandler(self.onOctetChanged)
+        # self.ipBinaryWidget.addOctetChangedHandler(self.onOctetChanged)
+        self.ipBinaryWidget.addOctetValueChangedHandler(self.onBinOctetValueChanged)
 
         convertIcon = QtWidgets.QLabel()
         convertIcon.setText('<-\n->')
@@ -145,13 +150,11 @@ class AddressConverter(QtWidgets.QWidget):
         hBox.addWidget(convertIcon)
         hBox.addWidget(self.ipBinaryWidget)
 
-    def onOctetChanged(self, octetNum, octetValue, isBinary = False):
-        if isBinary:
-            otherSeg = core.binaryOctetToOctet(octetValue)
-            self.ipWidget.setOctet(octetNum, otherSeg)
-        else:
-            otherSeg = core.octetToBinaryOctet(octetValue)
-            self.ipBinaryWidget.setOctet(octetNum, otherSeg)
+    def onDecOctetValueChanged(self, octetOrdinal, octetValue):
+        self.ipBinaryWidget.setOctetValue(octetOrdinal, octetValue)
+
+    def onBinOctetValueChanged(self, octetOrdinal, octetValue):
+        self.ipWidget.setOctetValue(octetOrdinal, octetValue)
 
 class IPv4Octet(QtWidgets.QLineEdit):
     @classmethod
@@ -162,21 +165,35 @@ class IPv4Octet(QtWidgets.QLineEdit):
     def binary(cls):
         return IPv4BinaryOctet()
 
+    valueChanged = QtCore.Signal(int)
+
     def __init__(self):
         super().__init__()
         self.binaryMode = False
-        self.defaultValue = '' # Set this from child class
+        self.defaultValue = 0 # Set this from child class
 
-    def getValue(self):
-        return self.text() if self.text() or self.text() != '' else self.defaultValue
+        self.textEdited.connect(lambda: self.onTextEdited())
 
-    def setValue(self, value):
-        self.setText(value)
+    def onTextEdited(self):
+        parsed = core.parseOctet(self.text(), self.binaryMode)
+        self.valueChanged.emit(parsed)
+
+    def getValue(self) -> int:
+        parsed = core.parseOctet(self.text(), self.binaryMode)
+        return parsed
+
+    def setValue(self, value:int, notify = False):
+        serialized = core.serializeOctet(value, self.binaryMode)
+        self.setText(serialized)
+
+        if notify:
+            self.valueChanged.emit(value)
 
     def keyPressEvent(self, event):
         if event.modifiers() == QtCore.Qt.KeyboardModifier.ControlModifier and event.key() == QtCore.Qt.Key.Key_V:
             text = QtGui.QGuiApplication.clipboard().text()
-            if core.isValidIPOctet(text, self.binaryMode):
+
+            if core.parseOctet(text, self.binaryMode) != -1:
                 self.setText(text)
                 self.textEdited.emit(self.getValue())
             else:
@@ -192,29 +209,24 @@ class IPv4Octet(QtWidgets.QLineEdit):
 class IPv4DecimalOctet(IPv4Octet):
     def __init__(self):
         super().__init__()
-        self.defaultValue = '0'
 
         self.setMaxLength(3)
         self.setMaximumWidth(30)
         self.setAlignment(QtCore.Qt.AlignRight)
         self.setInputMask('999')
         self.setText('000')
-        # self.setValidator(QtGui.QIntValidator(0, 255, self))
 
 class IPv4BinaryOctet(IPv4Octet):
     def __init__(self):
         super().__init__()
         self.binaryMode = True
-        # self.defaultValue = '00000000'
 
         self.setMaxLength(8)
         self.setMinimumWidth(70)
         self.setMaximumWidth(70)
         self.setAlignment(QtCore.Qt.AlignRight)
-        # self.setPlaceholderText('00000000')
         self.setInputMask('BBBBBBBB')
         self.setText('00000000')
-        # self.setValidator(QtGui.QIntValidator())
 
 class IPv4(QtWidgets.QWidget):
     def __init__(self, binaryMode = False):
@@ -223,68 +235,73 @@ class IPv4(QtWidgets.QWidget):
         self.binaryMode = binaryMode
         self.octetChangedHandlers = []
 
-        self.seg1 = IPv4Octet.binary() if binaryMode else IPv4Octet.decimal()
-        self.seg2 = IPv4Octet.binary() if binaryMode else IPv4Octet.decimal()
-        self.seg3 = IPv4Octet.binary() if binaryMode else IPv4Octet.decimal()
-        self.seg4 = IPv4Octet.binary() if binaryMode else IPv4Octet.decimal()
+        self.octets = []
 
-        self.seg1.textEdited.connect(lambda: self.onOctetChanged(1, self.seg1.getValue()))
-        self.seg2.textEdited.connect(lambda: self.onOctetChanged(2, self.seg2.getValue()))
-        self.seg3.textEdited.connect(lambda: self.onOctetChanged(3, self.seg3.getValue()))
-        self.seg4.textEdited.connect(lambda: self.onOctetChanged(4, self.seg4.getValue()))
+        self.octets.append(IPv4Octet.binary() if binaryMode else IPv4Octet.decimal())
+        self.octets.append(IPv4Octet.binary() if binaryMode else IPv4Octet.decimal())
+        self.octets.append(IPv4Octet.binary() if binaryMode else IPv4Octet.decimal())
+        self.octets.append(IPv4Octet.binary() if binaryMode else IPv4Octet.decimal())
+
+        self.octets[0].valueChanged.connect(lambda val: self.onOctetValueChanged(0, val))
+        self.octets[1].valueChanged.connect(lambda val: self.onOctetValueChanged(1, val))
+        self.octets[2].valueChanged.connect(lambda val: self.onOctetValueChanged(2, val))
+        self.octets[3].valueChanged.connect(lambda val: self.onOctetValueChanged(3, val))
 
         self.layout = QtWidgets.QHBoxLayout(self)
 
-        self.layout.addWidget(self.seg1)
+        self.layout.addWidget(self.octets[0])
         self.layout.addWidget(QtWidgets.QLabel("."))
-        self.layout.addWidget(self.seg2)
+        self.layout.addWidget(self.octets[1])
         self.layout.addWidget(QtWidgets.QLabel("."))
-        self.layout.addWidget(self.seg3)
+        self.layout.addWidget(self.octets[2])
         self.layout.addWidget(QtWidgets.QLabel("."))
-        self.layout.addWidget(self.seg4)
+        self.layout.addWidget(self.octets[3])
 
-    def getOctet(self, octetNum):
-        match octetNum:
-            case 1: return self.seg1.getValue()
-            case 2: return self.seg2.getValue()
-            case 3: return self.seg3.getValue()
-            case 4: return self.seg4.getValue()
+    def getIpAddress(self) -> []:
+        return [
+            self.octets[0].getValue(),
+            self.octets[1].getValue(),
+            self.octets[2].getValue(),
+            self.octets[3].getValue()
+        ]
 
-    def setOctet(self, octetNum, octetValue):
-        match octetNum:
-            case 1: self.seg1.setText(octetValue)
-            case 2: self.seg2.setText(octetValue)
-            case 3: self.seg3.setText(octetValue)
-            case 4: self.seg4.setText(octetValue)
+    def setIpAddress(self, ipAddress:[]):
+        for i in range(4):
+            self.octets[i].setValue(ipAddress[i])
 
-    def onOctetChanged(self, octetNum, octetValue):
+    def getOctetValue(self, octetOrdinal:int) -> int:
+        return self.octets[octetOrdinal - 1].getValue()
+
+    def setOctetValue(self, octetOrdinal: int, value:int):
+        self.octets[octetOrdinal - 1].setValue(value)
+
+    def onOctetValueChanged(self, octetIndex, value):
         for h in self.octetChangedHandlers:
-            h(octetNum, octetValue, self.binaryMode)
+            h(octetIndex + 1, value)
 
-    def addOctetChangedHandler(self, handler):
+    def addOctetValueChangedHandler(self, handler):
         self.octetChangedHandlers.append(handler)
 
-    def removeOctetChangedHandler(self, handler):
+    def removeOctetValueChangedHandler(self, handler):
         self.octetChangedHandlers.remove(handler)
 
     def keyPressEvent(self, event):
         if event.modifiers() == QtCore.Qt.KeyboardModifier.ControlModifier and event.key() == QtCore.Qt.Key.Key_V:
             text = QtGui.QGuiApplication.clipboard().text()
-            if core.isValidIPAddress(text, self.binaryMode):
-                tokens = text.split('.')
-                self.seg1.setText(tokens[0])
-                self.seg1.textEdited.emit(self.seg1.getValue())
-
-                self.seg2.setText(tokens[1])
-                self.seg2.textEdited.emit(self.seg2.getValue())
-
-                self.seg3.setText(tokens[2])
-                self.seg3.textEdited.emit(self.seg3.getValue())
-
-                self.seg4.setText(tokens[3])
-                self.seg4.textEdited.emit(self.seg4.getValue())
+            parsedIp = core.parseIpAddress(text, self.binaryMode)
+            if len(parsedIp) == 4:
+                self.octets[0].setValue(parsedIp[0], True)
+                self.octets[1].setValue(parsedIp[1], True)
+                self.octets[2].setValue(parsedIp[2], True)
+                self.octets[3].setValue(parsedIp[3], True)
         elif event.modifiers() == QtCore.Qt.KeyboardModifier.ControlModifier and event.key() == QtCore.Qt.Key.Key_C:
-            text = self.seg1.getValue() + '.' + self.seg2.getValue() + '.' + self.seg3.getValue() + '.' + self.seg4.getValue()
+            oct1 = core.serializeOctet(self.octets[0].getValue(), self.binaryMode)
+            oct2 = core.serializeOctet(self.octets[1].getValue(), self.binaryMode)
+            oct3 = core.serializeOctet(self.octets[2].getValue(), self.binaryMode)
+            oct4 = core.serializeOctet(self.octets[3].getValue(), self.binaryMode)
+
+            ip = [oct1, oct2, oct3, oct4]
+            text = '.'.join(ip)
             QtGui.QGuiApplication.clipboard().setText(text)
         else:
             super().keyPressEvent(event)
@@ -305,7 +322,7 @@ class SubnetMask(QtWidgets.QWidget):
         super().__init__()
 
         self.fullMask = IPv4()
-        self.fullMask.addOctetChangedHandler(self.onOctetChanged)
+        self.fullMask.addOctetValueChangedHandler(self.onOctetChanged)
 
         self.shortMask = QLineEditAsShortSubnetMask()
         self.shortMask.textEdited.connect(lambda: self.onShortMaskChanged(self.shortMask.text()[1:]))
@@ -314,48 +331,20 @@ class SubnetMask(QtWidgets.QWidget):
         layout.addWidget(self.fullMask)
         layout.addWidget(self.shortMask)
 
-    #TODO: Move calculations from this mehod to 'core'
-    def onOctetChanged(self, octetPosition, octet, isBinary = False):
-        isValid = True
-        networkBits = 0
+    def getMask(self) -> []:
+        return self.fullMask.getIpAddress()
 
-        prevOctetValue = 255 #Fake initial value to make the loop work
-        for i in range(1, 5):
-            currentOctet = self.fullMask.getOctet(i)
-            currentOctetValue = int(currentOctet, 10)
-            currentOctetNetworkBits = core.networkBitsInOctetValue(currentOctetValue)
-
-            if currentOctetNetworkBits == -1 or currentOctetNetworkBits > 0 and prevOctetValue != 255:
-                isValid = False
-                break
-
-            networkBits += currentOctetNetworkBits
-            prevOctetValue = currentOctetValue
-
-        if isValid:
+    def onOctetChanged(self, octetOrdinal, octetValue):
+        if core.isValidSubnetMask(self.fullMask.getIpAddress()):
+            networkBits = core.networkBitsInSubnetMask(self.fullMask.getIpAddress())
             self.shortMask.setText(str(networkBits))
         else:
-            self.shortMask.setText(str(-1))
+            self.shortMask.setText(str(0))
 
-    #TODO: Move calculations from this mehod to 'core'
     def onShortMaskChanged(self, mask):
-        try:
-            maskValue = int(mask, 10)
-        except ValueError:
-            maskValue = 0
+        subnetMask = core.calculateSubnetMaskFromShortMask(int(mask))
 
-        if maskValue >= 0 and maskValue <= 32:
-            fullOctets = int(maskValue / 8)
-            lastOcetBits = maskValue % 8
-
-            for i in range(fullOctets):
-                self.fullMask.setOctet(i + 1, '255')
-
-            self.fullMask.setOctet(fullOctets + 1, str(core.networkBitsToOctetValue(lastOcetBits)))
-
-            emptyOctets = 4 - fullOctets + 1
-            for i in range(emptyOctets):
-                self.fullMask.setOctet(fullOctets + 1 + i + 1, '0')
+        if len(subnetMask) == 0:
+            self.fullMask.setIpAddress([0, 0, 0, 0])
         else:
-            for i in range(4):
-                self.fullMask.setOctet(i + 1, '0')
+            self.fullMask.setIpAddress(subnetMask)
