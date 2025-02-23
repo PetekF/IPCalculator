@@ -181,4 +181,4 @@ def calculateAddressRange(lowerAddress:[], higherAddress:[]) -> int:
     firstAddress = (lowerAddress[0] << 24 | lowerAddress[1] << 16 | lowerAddress[2] << 8 | lowerAddress[3])
     lastAddress = (higherAddress[0] << 24 | higherAddress[1] << 16 | higherAddress[2] << 8 | higherAddress[3])
 
-    return lastAddress - firstAddress
+    return lastAddress - firstAddress + 1

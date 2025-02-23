@@ -1,3 +1,5 @@
+import math
+
 from PySide6 import QtCore, QtWidgets, QtGui
 from PySide6.QtCore import Qt
 import core
@@ -16,6 +18,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         layout.addWidget(AddressConverterGroup(), 0, 0, topRight)
         layout.addWidget(NetworkInfoGroup(), 0, 1, topLeft)
+        layout.addWidget(NetworkSizeFinderGroup(), 1, 0, topRight)
 
         self.setCentralWidget(centralWidget)
 
@@ -30,6 +33,87 @@ def QLineEditAsIpAddress():
     line.setPlaceholderText('0.0.0.0')
 
     return line
+
+class NetworkSizeFinderGroup(QtWidgets.QWidget):
+    def __init__(self):
+        super().__init__()
+
+        layout = QtWidgets.QGridLayout()
+        self.setLayout(layout)
+
+        groupbox = QtWidgets.QGroupBox("Network Size")
+        layout.addWidget(groupbox)
+
+        gridLayout = QtWidgets.QGridLayout()
+        groupbox.setLayout(gridLayout)
+
+        self.cbAddressClass = QtWidgets.QComboBox()
+        self.cbAddressClass.addItem('A')
+        self.cbAddressClass.addItem('B')
+        self.cbAddressClass.addItem('C')
+
+        gridLayout.addWidget(QtWidgets.QLabel('Address class:'),  0, 0, Qt.AlignmentFlag.AlignRight)
+        gridLayout.addWidget(self.cbAddressClass, 0, 1, Qt.AlignmentFlag.AlignLeft)
+
+        self.txtDevicesNum = QtWidgets.QLineEdit()
+        self.txtDevicesNum.setValidator(QtGui.QIntValidator())
+
+        gridLayout.addWidget(QtWidgets.QLabel('Number of devices:'), 1, 0, Qt.AlignmentFlag.AlignRight)
+        gridLayout.addWidget(self.txtDevicesNum, 1, 1, Qt.AlignmentFlag.AlignLeft)
+
+        self.txtNetworkAddress = QLineEditAsIpAddress()
+        self.txtSubnetMask = QLineEditAsShortSubnetMask()
+        self.txtSubnetMask.setEnabled(False)
+
+        gridLayout.addWidget(QtWidgets.QLabel("Network Address:"), 2, 0, Qt.AlignmentFlag.AlignRight)
+        gridLayout.addWidget(self.txtNetworkAddress, 2, 1, Qt.AlignmentFlag.AlignLeft)
+        gridLayout.addWidget(self.txtSubnetMask, 2, 2, Qt.AlignmentFlag.AlignLeft)
+
+        btn = QtWidgets.QPushButton("Calculate")
+        btn.setStyleSheet("background-color: darkcyan")
+        gridLayout.addWidget(btn, 3, 0, 1, 2)
+
+        btn.clicked.connect(lambda: self.onButtonClicked())
+
+    def onButtonClicked(self):
+        self.txtNetworkAddress.clear()
+        self.txtSubnetMask.clear()
+
+        addressClass = self.cbAddressClass.currentText()
+        hostsNum = int(self.txtDevicesNum.text())
+
+        networkAddress = ""
+        maxHostBits = 0
+        if addressClass == 'A':
+            networkAddress = "10.0.0.0"
+            maxHostBits = 24
+        elif addressClass == 'B':
+            networkAddress = "172.16.0.0"
+            maxHostBits = 16
+        elif addressClass == 'C':
+            networkAddress = "192.168.0.0"
+            maxHostBits = 8
+
+        maxHosts = pow(2, maxHostBits)
+
+        if (hostsNum > maxHosts):
+            return # cannot fit hosts in this address class
+
+        hostBits = 0
+        for i in range(1, maxHostBits + 1):
+            if pow(2, i) - 2 >= hostsNum :
+                hostBits = i
+                break
+
+        if hostBits < 2:
+            return #No avaliable addreses left besides network and broadcast
+
+        networkBits = 32 - hostBits
+
+        self.txtNetworkAddress.setText(networkAddress)
+        self.txtSubnetMask.setText(str(networkBits))
+
+
 
 class NetworkInfoGroup(QtWidgets.QWidget):
     def __init__(self):
