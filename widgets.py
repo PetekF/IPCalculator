@@ -79,6 +79,9 @@ class NetworkSizeFinderGroup(QtWidgets.QWidget):
         self.txtNetworkAddress.clear()
         self.txtSubnetMask.clear()
 
+        if (self.txtDevicesNum.text() == ''):
+            return
+
         addressClass = self.cbAddressClass.currentText()
         hostsNum = int(self.txtDevicesNum.text())
 
